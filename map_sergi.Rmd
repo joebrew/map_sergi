@@ -1,0 +1,310 @@
+---
+author: "Joe Brew"
+output: 
+  html_document:
+    theme: united
+---
+
+```{r setup, include=FALSE}
+# Basic knitr options
+knitr::opts_chunk$set(comment = NA, 
+                      echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE, 
+                      error = FALSE, 
+                      cache = FALSE)
+
+# Turn off scientific notation
+options(scipen = '999')
+
+
+```
+
+# Maps for Sergi and Elisa {.tabset .tabset-fade .tabset-pills}
+
+## Code
+
+### Data preparation
+
+```{r, echo = TRUE, eval = TRUE}
+# Libraries
+library(tidyverse)
+library(raster)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+library(broom)
+library(ggthemes)
+
+# Get each countries shapefile
+countries <- c('Gabon', 'Mozambique', 'Tanzania')
+iso3s <- c('GAB', 'MOZ', 'TZA')
+for(i in 1:length(countries)){
+  message('Fetching data for ', countries[i])
+  x <- getData(name = 'GADM', level = 2, country = iso3s[i])
+  assign(tolower(countries[i]),
+         x,
+         envir = .GlobalEnv)
+}
+
+# Define which districts are "special" -------------
+specials <- c('Ogooué et des Lacs','Douya Onoye',
+              'Bilene','Manhiça',
+              'Bagamoyo','Kisarawe')
+# Gabon
+gabon@data$special <- FALSE
+gabon@data$special[gabon@data$NAME_2 %in% specials] <- TRUE
+
+# Mozambique
+mozambique@data$special <- FALSE
+mozambique@data$special[mozambique@data$NAME_2 %in% specials] <- TRUE
+
+# Tanzania
+tanzania@data$special <- FALSE
+tanzania@data$special[tanzania@data$NAME_2 %in% specials] <- TRUE
+
+# Combine all data into a "long" / "tidy" format
+make_long <- function(x, region = "NAME_2"){
+  shp_df <- broom::tidy(x, region = region)
+  return(shp_df)
+}
+gabon_long <- make_long(gabon) %>% mutate(country = 'Gabon')
+mozambique_long <- make_long(mozambique) %>% mutate(country = 'Mozambique')
+tanzania_long <- make_long(tanzania) %>% mutate(country = 'Tanzania')
+combined <- bind_rows(
+  gabon_long,
+  mozambique_long,
+  tanzania_long
+)
+combined$special <- combined$id %in% specials
+# combined$special[!combined$special] <- NA
+# Get a map of africa to use as a background
+# from the cism package!
+africa <- cism::africa
+africa_long <- make_long(africa, region = 'COUNTRY')
+africa_long$special <- africa_long$id %in% countries
+```
+
+### Plotting code
+
+
+```{r, echo = TRUE, eval = FALSE}
+ggplot() +
+  geom_polygon(data = africa_long,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = grey(0.6),
+               alpha = 1,
+               color = 'white',
+               lwd = 0.3) +
+  geom_polygon(data = combined,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = grey(0.3)) +
+  geom_polygon(data = combined %>% filter(!is.na(special) & special),
+               aes(x = long,
+                   y = lat,
+                   group = group,
+                   fill = special)) +
+  scale_fill_manual(name = '',
+                    values = c('darkorange'),
+                    na.value = NA) +
+  coord_cartesian() +
+  ggthemes::theme_map() +
+  theme(legend.position = 'none') +
+  # redraw country lines
+  geom_polygon(data = africa_long,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = NA,
+               alpha = 1,
+               color = 'white',
+               lwd = 0.3)
+country_map <- function(the_country = 'Gabon'){
+  ggplot(data = combined %>% filter(country == the_country),
+         aes(x = long,
+             y = lat,
+             group = group,
+             fill = special)) +
+    geom_polygon(alpha = 0.8,
+                 lwd = 0.3,
+                 color = 'white') +
+    theme_map() +
+    coord_cartesian() + 
+    scale_fill_manual(name = '', values = c('darkgrey', 'darkred')) +
+    theme(legend.position = 'none')
+}
+country_map('Gabon')
+country_map('Mozambique')
+country_map('Tanzania')
+library(leaflet)
+library(leaflet.extras)
+l <- leaflet() %>%
+  addTiles(group = "OSM (default)") %>%
+  addProviderTiles(providers$Esri.WorldImagery, group = 'Satelite') %>%
+  addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  addPolygons(data = gabon,
+              fillColor = ifelse(gabon$special, 'darkred', 'red'),
+              group = 'Gabon',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(gabon$special, 0.9, 0.5)) %>%
+  addPolygons(data = mozambique,
+              fillColor = ifelse(mozambique$special, 'darkgreen', 'green'),
+              group = 'Mozambique',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(mozambique$special, 0.9, 0.5)) %>%
+  addPolygons(data = tanzania,
+              fillColor = ifelse(tanzania$special, 'darkblue', 'lightblue'),
+              group = 'Tanzania',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(tanzania$special, 0.9, 0.5)) %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satelite", "Toner", "Toner Lite"),
+    overlayGroups = c("Gabon", "Mozambique", "Tanzania"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  leaflet.extras::addFullscreenControl(position = "topleft", pseudoFullscreen = FALSE)
+
+l
+
+```
+
+
+
+
+
+
+
+
+
+
+
+## Static maps
+
+### All of Africa
+
+
+```{r}
+ggplot() +
+  geom_polygon(data = africa_long,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = grey(0.6),
+               alpha = 1,
+               color = 'white',
+               lwd = 0.3) +
+  geom_polygon(data = combined,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = grey(0.3)) +
+  geom_polygon(data = combined %>% filter(!is.na(special) & special),
+               aes(x = long,
+                   y = lat,
+                   group = group,
+                   fill = special)) +
+  scale_fill_manual(name = '',
+                    values = c('darkorange'),
+                    na.value = NA) +
+  coord_cartesian() +
+  ggthemes::theme_map() +
+  theme(legend.position = 'none') +
+  # redraw country lines
+  geom_polygon(data = africa_long,
+               aes(x = long,
+                   y = lat,
+                   group = group),
+               fill = NA,
+               alpha = 1,
+               color = 'white',
+               lwd = 0.3)
+```
+
+### By country
+
+```{r}
+country_map <- function(the_country = 'Gabon'){
+  ggplot(data = combined %>% filter(country == the_country),
+         aes(x = long,
+             y = lat,
+             group = group,
+             fill = special)) +
+    geom_polygon(alpha = 0.8,
+                 lwd = 0.3,
+                 color = 'white') +
+        coord_cartesian() + 
+    theme_map() +
+    scale_fill_manual(name = '', values = c('darkgrey', 'darkred')) +
+    theme(legend.position = 'none')
+}
+```
+
+#### Gabon
+
+```{r}
+country_map('Gabon')
+```
+
+
+#### Mozambique
+
+```{r}
+country_map('Mozambique')
+```
+
+#### Tanzania
+
+```{r}
+country_map('Tanzania')
+```
+
+
+
+## Interactive maps
+
+```{r}
+library(leaflet)
+library(leaflet.extras)
+l <- leaflet() %>%
+  addTiles(group = "OSM (default)") %>%
+  addProviderTiles(providers$Esri.WorldImagery, group = 'Satelite') %>%
+  addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  addPolygons(data = gabon,
+              fillColor = ifelse(gabon$special, 'darkred', 'red'),
+              group = 'Gabon',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(gabon$special, 0.9, 0.5)) %>%
+  addPolygons(data = mozambique,
+              fillColor = ifelse(mozambique$special, 'darkgreen', 'green'),
+              group = 'Mozambique',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(mozambique$special, 0.9, 0.5)) %>%
+  addPolygons(data = tanzania,
+              fillColor = ifelse(tanzania$special, 'darkblue', 'lightblue'),
+              group = 'Tanzania',
+              color = NA,
+              stroke = FALSE,
+              fillOpacity = ifelse(tanzania$special, 0.9, 0.5)) %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Satelite", "Toner", "Toner Lite"),
+    overlayGroups = c("Gabon", "Mozambique", "Tanzania"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  leaflet.extras::addFullscreenControl(position = "topleft", pseudoFullscreen = FALSE)
+
+l
+
+```
